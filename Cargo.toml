@@ -1,0 +1,10 @@
+[package]
+name = "template"
+version = "0.1.0"
+authors = ["eggmund <joshuacolclough2@googlemail.com>"]
+edition = "2018"
+
+[dependencies]
+ggez = "0.5.1"
+vulkano = "0.18"
+vulkano-shaders = "0.18"
