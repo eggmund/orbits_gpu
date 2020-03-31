@@ -29,41 +29,48 @@ layout(set = 0, binding = 0) uniform TimeData {
     float dt;
 };
 
-struct PosVelData
+struct BodyData
 {
     vec2 position;
     vec2 velocity;
+    vec2 acc;
+    float mass;
 };
 
 layout(set = 0, binding = 1) buffer Data {
-    PosVelData pos_vel_data[];
+    BodyData body_data[];
 } buf;
 
 void main() {
     uint idx = gl_GlobalInvocationID.x;
-    buf.pos_vel_data[idx].position += buf.pos_vel_data[idx].velocity * dt;
+    buf.body_data[idx].velocity += buf.body_data[idx].acc * dt;
+    buf.body_data[idx].position += buf.body_data[idx].velocity * dt;
 }"
     }
 }
 
 #[derive(Copy, Clone)]
-pub struct PosVelData {
-    pub pos: [f32; 2],
-    vel: [f32; 2],
+pub struct Body {
+    pub pos: Point2<f32>,
+    vel: Vector2<f32>,
+    acc: Vector2<f32>,
+    mass: f32,
 }
 
-impl PosVelData {
-    pub fn new(pos: [f32; 2], vel: [f32; 2]) -> PosVelData {
-        PosVelData {
+impl Body {
+    pub fn new(pos: Point2<f32>, vel: Vector2<f32>, acc: Vector2<f32>) -> Body {
+        Body {
             pos,
             vel,
+            acc,
+            mass: 10.0,
         }
     }
 }
 
 pub struct Buffers {
     pub time: Arc<CpuAccessibleBuffer<f32>>,
-    pub pos_vel: Arc<CpuAccessibleBuffer<[PosVelData]>>,
+    pub bodies: Arc<CpuAccessibleBuffer<[Body]>>,
 }
 
 pub struct VulkanInstance {
@@ -75,9 +82,9 @@ pub struct VulkanInstance {
 }
 
 impl VulkanInstance {
-    pub fn new(pos_vel_data: Vec<PosVelData>) -> VulkanInstance {
+    pub fn new(bodies_data: Vec<Body>) -> VulkanInstance {
         let (device, queue) = Self::setup_vulkan_device_and_queue();
-        let buffers = Self::setup_data_buffers(device.clone(), pos_vel_data);
+        let buffers = Self::setup_data_buffers(device.clone(), bodies_data);
         let (compute_pipeline, descriptor_set) = Self::setup_compute_pipeline_and_descriptors(device.clone(), &buffers);
 
         VulkanInstance {
@@ -110,19 +117,19 @@ impl VulkanInstance {
         (device, queues.next().unwrap())
     }
     
-    fn setup_data_buffers(device: Arc<Device>, data: Vec<PosVelData>) -> Buffers {
+    fn setup_data_buffers(device: Arc<Device>, data: Vec<Body>) -> Buffers {
         let data_len = data.len();
         // Buffer for dt. Starting value of 60fps
         let time_buf = CpuAccessibleBuffer::from_data(device.clone(), BufferUsage::uniform_buffer(), false, 1.0/60.0)
             .expect("failed to create time data buffer");
     
         // Positions and velocities buffer
-        let pos_vel_buf = CpuAccessibleBuffer::from_iter(device.clone(), BufferUsage::all(), true, data.into_iter())
+        let bodies_buf = CpuAccessibleBuffer::from_iter(device.clone(), BufferUsage::all(), true, data.into_iter())
             .expect("failed to create positions buffer");
     
         Buffers {
             time: time_buf,
-            pos_vel: pos_vel_buf,
+            bodies: bodies_buf,
         }
     }
     
@@ -144,7 +151,7 @@ impl VulkanInstance {
         let layout = compute_pipeline.layout().descriptor_set_layout(0).unwrap();
         let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
             .add_buffer(buffers.time.clone()).unwrap()
-            .add_buffer(buffers.pos_vel.clone()).unwrap()
+            .add_buffer(buffers.bodies.clone()).unwrap()
             .build().unwrap()
         );
     

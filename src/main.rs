@@ -1,16 +1,15 @@
 mod compute;
 
 use ggez::event;
-use ggez::graphics::{self, Mesh, DrawParam, DrawMode};
 use ggez::{Context, GameResult};
-use ggez::nalgebra::{Point2};
+use ggez::nalgebra::{Point2, Vector2};
 
 use vulkano::command_buffer::AutoCommandBufferBuilder;
 use vulkano::command_buffer::CommandBuffer;
 use vulkano::sync::GpuFuture;
 
 use compute::VulkanInstance;
-use compute::PosVelData;
+use compute::Body;
 
 const WORK_GROUP_SIZE: f32 = 64.0;
 
@@ -21,11 +20,11 @@ struct MainState {
 
 impl MainState {
     fn new(_ctx: &mut Context) -> GameResult<MainState> {
-        let start_pos_vel = vec![PosVelData::new([100.0, 100.0], [50.0, 0.0])];
-        let body_count = start_pos_vel.len();
+        let start_bodies = vec![Body::new(Point2::new(50.0, 100.0), Vector2::new(50.0, 0.0), Vector2::new(0.0, 9.81)); 100];
+        let body_count = start_bodies.len();
 
         let s = MainState {
-            vk_instance: VulkanInstance::new(start_pos_vel),
+            vk_instance: VulkanInstance::new(start_bodies),
             body_count,
         };
         Ok(s)
@@ -59,25 +58,28 @@ impl event::EventHandler for MainState {
 
     fn draw(&mut self, ctx: &mut Context) -> GameResult {
         use ggez::timer;
+        use ggez::graphics::{self, Mesh, DrawParam, DrawMode, MeshBuilder};
+
+        let mut render_mesh_builder = MeshBuilder::new();
 
         graphics::clear(ctx, [0.0, 0.0, 0.0, 1.0].into());
         // Read positions from buffer
         {
-            let mut pos_vel_data = self.vk_instance.buffers.pos_vel.read().unwrap();
+            let mut bodies_data = self.vk_instance.buffers.bodies.read().unwrap();
 
-            for p in pos_vel_data.iter() {
-                let circ = Mesh::new_circle(
-                    ctx,
-                    DrawMode::stroke(2.0),
+            for p in bodies_data.iter() {
+                render_mesh_builder.circle(
+                    DrawMode::fill(),
                     p.pos,
                     10.0,
                     1.0,
                     [0.9, 0.9, 0.9, 1.0].into(),
-                )?;
-
-                graphics::draw(ctx, &circ, DrawParam::new())?;
+                );
             }
         }
+
+        let render_mesh = render_mesh_builder.build(ctx)?;
+        graphics::draw(ctx, &render_mesh, DrawParam::new())?;
 
         let fps_text = graphics::Text::new(format!("FPS: {}", timer::fps(ctx)));
         graphics::draw(ctx, &fps_text, 
