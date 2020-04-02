@@ -8,26 +8,121 @@ use vulkano::command_buffer::AutoCommandBufferBuilder;
 use vulkano::command_buffer::CommandBuffer;
 use vulkano::sync::GpuFuture;
 
+use rand::prelude::*;
+
+use std::f32::consts::PI;
+
 use compute::VulkanInstance;
 use compute::Body;
 
-const WORK_GROUP_SIZE: f32 = 64.0;
+const G: f32 = 0.001;
+pub const STAR_DENSITY: f32 = 5000.0;
+pub const BLACK_HOLE_DENSITY: f32 = 1.0e8;
+// const WORK_GROUP_SIZE: f32 = 1.0;
+const TWO_PI: f32 = PI * 2.0;
+const SCREEN_DIMS: (f32, f32) = (1000.0, 800.0);
+
+mod tools {
+    use ggez::nalgebra::{Point2, Vector2};
+    #[inline]
+    pub fn get_components(mag: f32, angle: f32) -> Vector2<f32> {
+        Vector2::new(mag * angle.cos(), mag * angle.sin())
+    }
+}
 
 struct MainState {
     vk_instance: VulkanInstance,
     body_count: usize,
+    rand_thread: ThreadRng,
 }
 
 impl MainState {
     fn new(_ctx: &mut Context) -> GameResult<MainState> {
-        let start_bodies = vec![Body::new(Point2::new(50.0, 100.0), Vector2::new(50.0, 0.0), Vector2::new(0.0, 9.81)); 100];
+        let mut rand_thread = rand::thread_rng();
+
+        let start_bodies = Self::spawn_galaxy(
+            &mut rand_thread,
+            [SCREEN_DIMS.0/2.0, SCREEN_DIMS.1/2.0],
+            None,
+            None,
+            2.0,
+            1000,
+            [0.5, 2.0],
+            [20.0, 300.0],
+            false,
+        );
+        // let start_bodies = vec![
+        //     Body::new([300.0, SCREEN_DIMS.1/2.0], Some([0.0, 0.0]), 10.0, None, None),
+        //     Body::new([600.0, SCREEN_DIMS.1/2.0], Some([0.0, 0.0]), 10.0, None, None),
+        // ];
+
+        // vec![Body::new([50.0, 100.0], Some([50.0, 0.0]), 10.0, None, None); 7000];
         let body_count = start_bodies.len();
 
         let s = MainState {
             vk_instance: VulkanInstance::new(start_bodies),
             body_count,
+            rand_thread,
         };
         Ok(s)
+    }
+
+    fn spawn_galaxy(
+        rand_thread: &mut ThreadRng,
+        pos: [f32; 2],
+        vel: Option<[f32; 2]>,
+        black_hole_mass: Option<f32>,
+        black_hole_radius: f32,
+        star_num: usize,
+        star_radius_range: [f32; 2],
+        star_orbit_radius_range: [f32; 2],
+        orbit_direction_clockwise: bool,
+    ) -> Vec<Body> 
+    {
+        let mut bodies = Vec::with_capacity(star_num + 1);
+        let black_hole_mass = black_hole_mass
+            .unwrap_or_else(|| Body::mass_from_radius(black_hole_radius, BLACK_HOLE_DENSITY));
+        
+        let black_hole = Body::new(pos, vel, black_hole_radius, Some(black_hole_mass), Some(BLACK_HOLE_DENSITY));
+        let frame_vel = vel.unwrap_or_else(|| [0.0; 2]);
+
+        for _ in 0..star_num {
+            let orbit_radius = black_hole.radius + rand_thread.gen_range(star_orbit_radius_range[0], star_orbit_radius_range[1]);
+            let orbit_speed = Self::circular_orbit_speed(black_hole.mass, orbit_radius);
+            let start_angle = rand_thread.gen_range(0.0, TWO_PI);
+            let start_pos = tools::get_components(orbit_radius, start_angle);
+            let start_velocity = tools::get_components(
+                orbit_speed,
+                if orbit_direction_clockwise {  // Velocity is perpendicular to position
+                    start_angle + PI/2.0
+                } else {
+                    start_angle - PI/2.0
+                }
+            );
+            let radius = rand_thread.gen_range(star_radius_range[0], star_radius_range[1]);
+
+            bodies.push(Body::new(
+                [pos[0] + start_pos.x, pos[1] + start_pos.y],
+                Some([frame_vel[0] + start_velocity.x, frame_vel[1] + start_velocity.y]),
+                radius,
+                None,
+                None,
+            ));
+        }
+
+        bodies.push(black_hole);
+        bodies
+    }
+
+    // Returns the magnitude of the velocity (speed) needed for a circular orbit around another body
+    // Orbit is circular when the kinetic energy does not change.
+    // K = GMm/2r  -- Derived from centripetal force (in circular motion) = gravitational force
+    // GMm/2r = 1/2 mv^2
+    // GM/2r = 1/2 v^2
+    // sqrt(GM/r) = v
+    #[inline]
+    fn circular_orbit_speed(host_mass: f32, radius: f32) -> f32 {
+        (G * host_mass/radius).sqrt()
     }
 }
 
@@ -37,14 +132,19 @@ impl event::EventHandler for MainState {
 
         let dt = timer::duration_to_f64(timer::delta(ctx)) as f32;
         // Update time buffer
-        {
-            let mut time_data = self.vk_instance.buffers.time.write().unwrap();
-            *time_data = dt;
-        }
+        // {
+        //     let mut time_data = self.vk_instance.buffers.time.write().unwrap();
+        //     *time_data = dt;
+        // }
 
         // Run compute pipeline
         let command_buffer = AutoCommandBufferBuilder::new(self.vk_instance.device.clone(), self.vk_instance.queue.family()).unwrap()
-            .dispatch([(self.body_count as f32/WORK_GROUP_SIZE).ceil() as u32, 1, 1], self.vk_instance.compute_pipeline.clone(), self.vk_instance.descriptor_set.clone(), ()).unwrap()
+            .dispatch(
+                [self.body_count as u32, 1, 1],
+                self.vk_instance.compute_pipeline.clone(),
+                self.vk_instance.descriptor_set.clone(),
+                ()
+            ).unwrap()
             .build().unwrap();
         
         let finished = command_buffer.execute(self.vk_instance.queue.clone()).unwrap();
@@ -58,20 +158,24 @@ impl event::EventHandler for MainState {
 
     fn draw(&mut self, ctx: &mut Context) -> GameResult {
         use ggez::timer;
-        use ggez::graphics::{self, Mesh, DrawParam, DrawMode, MeshBuilder};
+        use ggez::graphics::{self, DrawParam, DrawMode, MeshBuilder};
 
         let mut render_mesh_builder = MeshBuilder::new();
 
         graphics::clear(ctx, [0.0, 0.0, 0.0, 1.0].into());
         // Read positions from buffer
         {
-            let mut bodies_data = self.vk_instance.buffers.bodies.read().unwrap();
+            let bodies_data = self.vk_instance.buffers.bodies.read().unwrap();
 
-            for p in bodies_data.iter() {
+            for b in bodies_data.iter() {
+                let pos = {
+                    let pos_ref: &[f32; 2] = b.pos.as_ref();
+                    Point2::new(pos_ref[0], pos_ref[1])
+                };
                 render_mesh_builder.circle(
                     DrawMode::fill(),
-                    p.pos,
-                    10.0,
+                    pos,
+                    b.radius,
                     1.0,
                     [0.9, 0.9, 0.9, 1.0].into(),
                 );
@@ -95,7 +199,10 @@ impl event::EventHandler for MainState {
 }
 
 pub fn main() -> GameResult {
-    let cb = ggez::ContextBuilder::new("super_simple", "ggez");
+    use ggez::conf::WindowMode;
+
+    let cb = ggez::ContextBuilder::new("super_simple", "ggez")
+        .window_mode(WindowMode::default().dimensions(SCREEN_DIMS.0, SCREEN_DIMS.1));
     let (ctx, event_loop) = &mut cb.build()?;
     let state = &mut MainState::new(ctx)?;
     event::run(ctx, event_loop, state)

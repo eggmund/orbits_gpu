@@ -13,9 +13,13 @@ use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::descriptor::DescriptorSet;
 use vulkano::descriptor::pipeline_layout::PipelineLayoutAbstract;
 
-use ggez::nalgebra::{Point2, Vector2};
+use glsl_layout::AsStd140;
+use glsl_layout::vec2;
+use glsl_layout::float;
 
 use std::sync::Arc;
+
+use crate::STAR_DENSITY;
 
 mod cs {
     vulkano_shaders::shader!{
@@ -23,50 +27,92 @@ mod cs {
         src: "
 #version 450
 
-layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+#define G 0.001
+
+layout(local_size_x = 1) in;
 
 layout(set = 0, binding = 0) uniform TimeData {
     float dt;
 };
 
-struct BodyData
+struct Body
 {
-    vec2 position;
-    vec2 velocity;
-    vec2 acc;
-    float mass;
+    vec2 position; // 1 2
+    vec2 velocity; // 3 4
+    float radius;  // 5
+    float mass;    // 6
 };
 
 layout(set = 0, binding = 1) buffer Data {
-    BodyData body_data[];
+    Body body_data[];
 } buf;
+
+
+vec2 calculate_grav_force(uint idx) {
+    uint max_index = gl_NumWorkGroups.x * gl_WorkGroupSize.x;
+    vec2 resultant_force = vec2(0.0, 0.0);
+
+    for (uint i = 0; i < max_index; i++) {
+        if (i != idx) { // If not itself, get grav force between
+            // Get vector going from this planet to the other
+            vec2 dist_vec = buf.body_data[i].position - buf.body_data[idx].position;
+            // F = GMm/r^2 * r_norm, r_norm = r/|r| -> GMm/r^3 * r
+            float distance = length(dist_vec);
+            // If they aren't colliding further than half into each other
+            if (distance > (buf.body_data[i].radius + buf.body_data[i].radius)/2.0) {
+                resultant_force += dist_vec * (G * buf.body_data[i].mass * buf.body_data[idx].mass)/pow(distance, 3);
+            }
+        }
+    }
+
+    return resultant_force;
+}
 
 void main() {
     uint idx = gl_GlobalInvocationID.x;
-    buf.body_data[idx].velocity += buf.body_data[idx].acc * dt;
-    buf.body_data[idx].position += buf.body_data[idx].velocity * dt;
-}"
+
+    if (buf.body_data[idx].radius > 0.0) {
+        vec2 acc = calculate_grav_force(idx)/buf.body_data[idx].mass;
+        buf.body_data[idx].velocity += acc * dt;
+        buf.body_data[idx].position += buf.body_data[idx].velocity * dt;
+    }
+}
+",
+        //path: "src/motion.cs",
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug, AsStd140)]
 pub struct Body {
-    pub pos: Point2<f32>,
-    vel: Vector2<f32>,
-    acc: Vector2<f32>,
-    mass: f32,
+    pub pos: vec2,
+    pub vel: vec2,
+    pub radius: float,
+    pub mass: float,
 }
 
 impl Body {
-    pub fn new(pos: Point2<f32>, vel: Vector2<f32>, acc: Vector2<f32>) -> Body {
+    pub fn new(pos: [f32; 2], vel: Option<[f32; 2]>, radius: f32, mass: Option<f32>, density: Option<f32>) -> Body {
         Body {
-            pos,
-            vel,
-            acc,
-            mass: 10.0,
+            pos: pos.into(),
+            vel: (vel.unwrap_or_else(|| [0.0; 2])).into(),
+            radius: radius.into(),
+            mass: mass.unwrap_or_else(|| {
+                Self::mass_from_radius(radius, density.unwrap_or_else(|| STAR_DENSITY))
+            }).into(),
         }
     }
+
+    #[inline]
+    pub fn mass_from_radius(r: f32, density: f32) -> f32 {
+        use std::f32::consts::PI;
+        // V = 4/3 pi r^3
+        // d = m/v -> vd = m
+        4.0/3.0 * PI * r.powi(3) * density
+    }
 }
+
+// Body needs to have variables aligned properly for reading by GLSL
+// type GLSLBody = <Body as AsStd140>::Std140;
 
 pub struct Buffers {
     pub time: Arc<CpuAccessibleBuffer<f32>>,
@@ -118,14 +164,20 @@ impl VulkanInstance {
     }
     
     fn setup_data_buffers(device: Arc<Device>, data: Vec<Body>) -> Buffers {
-        let data_len = data.len();
+        let bodies = data.into_iter();
+            // .map(|b| b.std140());
+
         // Buffer for dt. Starting value of 60fps
-        let time_buf = CpuAccessibleBuffer::from_data(device.clone(), BufferUsage::uniform_buffer(), false, 1.0/60.0)
+        let time_buf = CpuAccessibleBuffer::from_data(device.clone(), BufferUsage::uniform_buffer(), false, 1.0/144.0)
             .expect("failed to create time data buffer");
     
         // Positions and velocities buffer
-        let bodies_buf = CpuAccessibleBuffer::from_iter(device.clone(), BufferUsage::all(), true, data.into_iter())
-            .expect("failed to create positions buffer");
+        let bodies_buf = CpuAccessibleBuffer::from_iter(
+            device.clone(),
+            BufferUsage::all(),
+            true,
+            bodies
+        ).expect("failed to create positions buffer");
     
         Buffers {
             time: time_buf,
