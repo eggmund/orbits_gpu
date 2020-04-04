@@ -29,7 +29,7 @@ mod cs {
 
 #define G 0.001
 
-layout(local_size_x = 1) in;
+layout(local_size_x = 64) in;
 
 layout(set = 0, binding = 0) uniform TimeData {
     float dt;
@@ -59,7 +59,7 @@ vec2 calculate_grav_force(uint idx) {
             // F = GMm/r^2 * r_norm, r_norm = r/|r| -> GMm/r^3 * r
             float distance = length(dist_vec);
             // If they aren't colliding further than half into each other
-            if (distance > (buf.body_data[i].radius + buf.body_data[i].radius)/2.0) {
+            if (distance > buf.body_data[i].radius + buf.body_data[i].radius) {
                 resultant_force += dist_vec * (G * buf.body_data[i].mass * buf.body_data[idx].mass)/pow(distance, 3);
             }
         }
@@ -168,7 +168,7 @@ impl VulkanInstance {
             // .map(|b| b.std140());
 
         // Buffer for dt. Starting value of 60fps
-        let time_buf = CpuAccessibleBuffer::from_data(device.clone(), BufferUsage::uniform_buffer(), false, 1.0/144.0)
+        let time_buf = CpuAccessibleBuffer::from_data(device.clone(), BufferUsage::uniform_buffer(), false, 1.0/60.0)
             .expect("failed to create time data buffer");
     
         // Positions and velocities buffer

@@ -11,14 +11,15 @@ use vulkano::sync::GpuFuture;
 use rand::prelude::*;
 
 use std::f32::consts::PI;
+use std::time::{Instant, Duration};
 
 use compute::VulkanInstance;
 use compute::Body;
 
 const G: f32 = 0.001;
-pub const STAR_DENSITY: f32 = 5000.0;
-pub const BLACK_HOLE_DENSITY: f32 = 1.0e8;
-// const WORK_GROUP_SIZE: f32 = 1.0;
+pub const STAR_DENSITY: f32 = 50.0;
+pub const BLACK_HOLE_DENSITY: f32 = 1.0e7;
+const WORK_GROUP_SIZE: f32 = 64.0;
 const TWO_PI: f32 = PI * 2.0;
 const SCREEN_DIMS: (f32, f32) = (1000.0, 800.0);
 
@@ -32,37 +33,52 @@ mod tools {
 
 struct MainState {
     vk_instance: VulkanInstance,
-    body_count: usize,
+    body_count: u32,
     rand_thread: ThreadRng,
+    starting_update_num: usize,   // So that dt can stabilise
 }
 
 impl MainState {
     fn new(_ctx: &mut Context) -> GameResult<MainState> {
         let mut rand_thread = rand::thread_rng();
 
-        let start_bodies = Self::spawn_galaxy(
+        let mut start_bodies = Self::spawn_galaxy(
             &mut rand_thread,
-            [SCREEN_DIMS.0/2.0, SCREEN_DIMS.1/2.0],
+            [SCREEN_DIMS.0/3.0, SCREEN_DIMS.1/2.0],
+            Some([0.0, 10.0]),
+            None,
+            2.0,
+            2000,
+            [0.5, 1.5],
+            [10.0, 150.0],
+            true,
+        );
+        let mut second_galaxy = Self::spawn_galaxy(
+            &mut rand_thread,
+            [SCREEN_DIMS.0 - SCREEN_DIMS.0/3.0, SCREEN_DIMS.1/2.0],
             None,
             None,
             2.0,
-            1000,
-            [0.5, 2.0],
-            [20.0, 300.0],
+            2000,
+            [0.5, 1.5],
+            [10.0, 150.0],
             false,
         );
+        start_bodies.append(&mut second_galaxy);
+
         // let start_bodies = vec![
         //     Body::new([300.0, SCREEN_DIMS.1/2.0], Some([0.0, 0.0]), 10.0, None, None),
         //     Body::new([600.0, SCREEN_DIMS.1/2.0], Some([0.0, 0.0]), 10.0, None, None),
         // ];
 
         // vec![Body::new([50.0, 100.0], Some([50.0, 0.0]), 10.0, None, None); 7000];
-        let body_count = start_bodies.len();
+        let body_count = start_bodies.len() as u32;
 
         let s = MainState {
             vk_instance: VulkanInstance::new(start_bodies),
             body_count,
             rand_thread,
+            starting_update_num: 0,
         };
         Ok(s)
     }
@@ -129,18 +145,22 @@ impl MainState {
 impl event::EventHandler for MainState {
     fn update(&mut self, ctx: &mut Context) -> GameResult {
         use ggez::timer;
+        const DT_UPDATE_THRESHOLD: usize = 10;  // Number of updates before dt will be updated to gpu
 
         let dt = timer::duration_to_f64(timer::delta(ctx)) as f32;
         // Update time buffer
-        // {
-        //     let mut time_data = self.vk_instance.buffers.time.write().unwrap();
-        //     *time_data = dt;
-        // }
+        // This threshold is needed since dt varies wildly at the start and causes bodies to fly everywhere
+        if self.starting_update_num > DT_UPDATE_THRESHOLD {  
+            let mut time_data = self.vk_instance.buffers.time.write().unwrap();
+            *time_data = dt;
+        } else {
+            self.starting_update_num += 1;
+        }
 
         // Run compute pipeline
         let command_buffer = AutoCommandBufferBuilder::new(self.vk_instance.device.clone(), self.vk_instance.queue.family()).unwrap()
             .dispatch(
-                [self.body_count as u32, 1, 1],
+                [(self.body_count as f32/WORK_GROUP_SIZE).ceil() as u32, 1, 1],
                 self.vk_instance.compute_pipeline.clone(),
                 self.vk_instance.descriptor_set.clone(),
                 ()
@@ -162,7 +182,7 @@ impl event::EventHandler for MainState {
 
         let mut render_mesh_builder = MeshBuilder::new();
 
-        graphics::clear(ctx, [0.0, 0.0, 0.0, 1.0].into());
+        graphics::clear(ctx, [0.1, 0.1, 0.15, 1.0].into());
         // Read positions from buffer
         {
             let bodies_data = self.vk_instance.buffers.bodies.read().unwrap();
