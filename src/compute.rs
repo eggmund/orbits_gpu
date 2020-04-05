@@ -41,6 +41,7 @@ struct Body
     vec2 velocity; // 3 4
     float radius;  // 5
     float mass;    // 6
+    // vec4 color;    // 7 8 9 10
 };
 
 layout(set = 0, binding = 1) buffer Data {

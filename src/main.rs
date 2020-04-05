@@ -2,7 +2,7 @@ mod compute;
 
 use ggez::event::{self, KeyCode, KeyMods};
 use ggez::{Context, GameResult};
-use ggez::nalgebra::{Point2, Vector2};
+use ggez::nalgebra::Point2;
 
 use vulkano::command_buffer::AutoCommandBufferBuilder;
 use vulkano::command_buffer::CommandBuffer;
@@ -11,7 +11,6 @@ use vulkano::sync::GpuFuture;
 use rand::prelude::*;
 
 use std::f32::consts::PI;
-use std::time::{Instant, Duration};
 
 use compute::VulkanInstance;
 use compute::Body;
@@ -22,10 +21,48 @@ pub const BLACK_HOLE_DENSITY: f32 = 1.0e7;
 const WORK_GROUP_SIZE: f32 = 64.0;
 const TWO_PI: f32 = PI * 2.0;
 const SCREEN_DIMS: (f32, f32) = (1000.0, 800.0);
-const GALAXY_SIZE: usize = 3000;
+const GALAXY_SIZE: usize = (1024 * 4) - 1;
+
+
+macro_rules! starting_setup {       // The starting setup when you open the program and when you reset
+    ($rand_thread: expr, $start_bodies: expr) => {
+        let mut first_galaxy = Self::spawn_galaxy(
+            $rand_thread,
+            [SCREEN_DIMS.0/3.0, SCREEN_DIMS.1/2.0],
+            Some([0.0, 20.0]),
+            None,
+            2.0,
+            GALAXY_SIZE,
+            [0.7, 1.5],
+            [10.0, 150.0],
+            true,
+        );
+        let mut second_galaxy = Self::spawn_galaxy(
+            $rand_thread,
+            [SCREEN_DIMS.0 - SCREEN_DIMS.0/3.0, SCREEN_DIMS.1/2.0],
+            Some([0.0, -20.0]),
+            None,
+            2.0,
+            GALAXY_SIZE,
+            [0.7, 1.5],
+            [10.0, 150.0],
+            false,
+        );
+        $start_bodies.append(&mut first_galaxy);
+        $start_bodies.append(&mut second_galaxy);
+
+        // let start_bodies = vec![
+        //     Body::new([300.0, SCREEN_DIMS.1/2.0], Some([0.0, 0.0]), 10.0, None, None),
+        //     Body::new([600.0, SCREEN_DIMS.1/2.0], Some([0.0, 0.0]), 10.0, None, None),
+        // ];
+
+        // vec![Body::new([50.0, 100.0], Some([50.0, 0.0]), 10.0, None, None); 7000];
+    };
+}
+
 
 mod tools {
-    use ggez::nalgebra::{Point2, Vector2};
+    use ggez::nalgebra::Vector2;
     #[inline]
     pub fn get_components(mag: f32, angle: f32) -> Vector2<f32> {
         Vector2::new(mag * angle.cos(), mag * angle.sin())
@@ -42,37 +79,9 @@ struct MainState {
 impl MainState {
     fn new(_ctx: &mut Context) -> GameResult<MainState> {
         let mut rand_thread = rand::thread_rng();
+        let mut start_bodies = Vec::with_capacity(GALAXY_SIZE * 2 + 2);
 
-        let mut start_bodies = Self::spawn_galaxy(
-            &mut rand_thread,
-            [SCREEN_DIMS.0/3.0, SCREEN_DIMS.1/2.0],
-            Some([0.0, 20.0]),
-            None,
-            2.0,
-            GALAXY_SIZE,
-            [0.7, 1.5],
-            [10.0, 150.0],
-            true,
-        );
-        let mut second_galaxy = Self::spawn_galaxy(
-            &mut rand_thread,
-            [SCREEN_DIMS.0 - SCREEN_DIMS.0/3.0, SCREEN_DIMS.1/2.0],
-            Some([0.0, -20.0]),
-            None,
-            2.0,
-            GALAXY_SIZE,
-            [0.7, 1.5],
-            [10.0, 150.0],
-            false,
-        );
-        start_bodies.append(&mut second_galaxy);
-
-        // let start_bodies = vec![
-        //     Body::new([300.0, SCREEN_DIMS.1/2.0], Some([0.0, 0.0]), 10.0, None, None),
-        //     Body::new([600.0, SCREEN_DIMS.1/2.0], Some([0.0, 0.0]), 10.0, None, None),
-        // ];
-
-        // vec![Body::new([50.0, 100.0], Some([50.0, 0.0]), 10.0, None, None); 7000];
+        starting_setup!(&mut rand_thread, start_bodies);
         let body_count = start_bodies.len() as u32;
 
         let s = MainState {
@@ -85,30 +94,8 @@ impl MainState {
     }
 
     fn reset(&mut self) {
-        let mut start_bodies = Self::spawn_galaxy(
-            &mut self.rand_thread,
-            [SCREEN_DIMS.0/3.0, SCREEN_DIMS.1/2.0],
-            Some([0.0, 20.0]),
-            None,
-            2.0,
-            GALAXY_SIZE,
-            [0.7, 1.5],
-            [10.0, 150.0],
-            true,
-        );
-        let mut second_galaxy = Self::spawn_galaxy(
-            &mut self.rand_thread,
-            [SCREEN_DIMS.0 - SCREEN_DIMS.0/3.0, SCREEN_DIMS.1/2.0],
-            Some([0.0, -20.0]),
-            None,
-            2.0,
-            GALAXY_SIZE,
-            [0.7, 1.5],
-            [10.0, 150.0],
-            false,
-        );
-        start_bodies.append(&mut second_galaxy);
-
+        let mut start_bodies = Vec::with_capacity(GALAXY_SIZE * 2 + 2);
+        starting_setup!(&mut self.rand_thread, start_bodies);
         self.body_count = start_bodies.len() as u32;
 
         self.vk_instance.set_bodies_buffer(start_bodies);
