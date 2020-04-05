@@ -219,6 +219,10 @@ impl VulkanInstance {
             new_bodies.into_iter()
         ).expect("failed to create positions buffer");
 
+        self.rebuild_pipeline();
+    }
+
+    fn rebuild_pipeline(&mut self) {
         let (pipeline, descriptor_set) = Self::setup_compute_pipeline_and_descriptors(self.device.clone(), &self.buffers);
         self.compute_pipeline = pipeline;
         self.descriptor_set = descriptor_set;
