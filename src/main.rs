@@ -35,7 +35,7 @@ macro_rules! starting_setup {       // The starting setup when you open the prog
             GALAXY_SIZE,
             [0.7, 1.5],
             [10.0, 150.0],
-            true,
+            false,
         );
         let mut second_galaxy = Self::spawn_galaxy(
             $rand_thread,
