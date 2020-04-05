@@ -209,4 +209,17 @@ impl VulkanInstance {
     
         (compute_pipeline, descriptor_set)
     }
+
+    pub fn set_bodies_buffer(&mut self, new_bodies: Vec<Body>) {
+        self.buffers.bodies = CpuAccessibleBuffer::from_iter(
+            self.device.clone(),
+            BufferUsage::all(),
+            true,
+            new_bodies.into_iter()
+        ).expect("failed to create positions buffer");
+
+        let (pipeline, descriptor_set) = Self::setup_compute_pipeline_and_descriptors(self.device.clone(), &self.buffers);
+        self.compute_pipeline = pipeline;
+        self.descriptor_set = descriptor_set;
+    }
 }

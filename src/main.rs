@@ -1,6 +1,6 @@
 mod compute;
 
-use ggez::event;
+use ggez::event::{self, KeyCode, KeyMods};
 use ggez::{Context, GameResult};
 use ggez::nalgebra::{Point2, Vector2};
 
@@ -22,6 +22,7 @@ pub const BLACK_HOLE_DENSITY: f32 = 1.0e7;
 const WORK_GROUP_SIZE: f32 = 64.0;
 const TWO_PI: f32 = PI * 2.0;
 const SCREEN_DIMS: (f32, f32) = (1000.0, 800.0);
+const GALAXY_SIZE: usize = 3000;
 
 mod tools {
     use ggez::nalgebra::{Point2, Vector2};
@@ -45,22 +46,22 @@ impl MainState {
         let mut start_bodies = Self::spawn_galaxy(
             &mut rand_thread,
             [SCREEN_DIMS.0/3.0, SCREEN_DIMS.1/2.0],
-            Some([0.0, 10.0]),
+            Some([0.0, 20.0]),
             None,
             2.0,
-            2000,
-            [0.5, 1.5],
+            GALAXY_SIZE,
+            [0.7, 1.5],
             [10.0, 150.0],
             true,
         );
         let mut second_galaxy = Self::spawn_galaxy(
             &mut rand_thread,
             [SCREEN_DIMS.0 - SCREEN_DIMS.0/3.0, SCREEN_DIMS.1/2.0],
-            None,
+            Some([0.0, -20.0]),
             None,
             2.0,
-            2000,
-            [0.5, 1.5],
+            GALAXY_SIZE,
+            [0.7, 1.5],
             [10.0, 150.0],
             false,
         );
@@ -81,6 +82,36 @@ impl MainState {
             starting_update_num: 0,
         };
         Ok(s)
+    }
+
+    fn reset(&mut self) {
+        let mut start_bodies = Self::spawn_galaxy(
+            &mut self.rand_thread,
+            [SCREEN_DIMS.0/3.0, SCREEN_DIMS.1/2.0],
+            Some([0.0, 20.0]),
+            None,
+            2.0,
+            GALAXY_SIZE,
+            [0.7, 1.5],
+            [10.0, 150.0],
+            true,
+        );
+        let mut second_galaxy = Self::spawn_galaxy(
+            &mut self.rand_thread,
+            [SCREEN_DIMS.0 - SCREEN_DIMS.0/3.0, SCREEN_DIMS.1/2.0],
+            Some([0.0, -20.0]),
+            None,
+            2.0,
+            GALAXY_SIZE,
+            [0.7, 1.5],
+            [10.0, 150.0],
+            false,
+        );
+        start_bodies.append(&mut second_galaxy);
+
+        self.body_count = start_bodies.len() as u32;
+
+        self.vk_instance.set_bodies_buffer(start_bodies);
     }
 
     fn spawn_galaxy(
@@ -215,6 +246,19 @@ impl event::EventHandler for MainState {
 
         graphics::present(ctx)?;
         Ok(())
+    }
+
+    fn key_down_event(
+        &mut self,
+        _ctx: &mut Context,
+        keycode: KeyCode,
+        _keymod: KeyMods,
+        _repeat: bool,
+    ) {
+        match keycode {
+            KeyCode::R => self.reset(),
+            _ => ()
+        }
     }
 }
 
