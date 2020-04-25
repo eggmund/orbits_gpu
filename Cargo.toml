@@ -1,5 +1,5 @@
 [package]
-name = "galaxy_nbody"
+name = "orbits"
 version = "0.1.0"
 authors = ["eggmund <joshuacolclough2@googlemail.com>"]
 edition = "2018"

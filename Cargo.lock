@@ -582,17 +582,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a06f77d526c1a601b7c4cdd98f54b5eaabffc14d5f2f0296febdc7f357c6d3ba"
 
 [[package]]
-name = "galaxy_nbody"
-version = "0.1.0"
-dependencies = [
- "ggez",
- "glsl-layout",
- "rand 0.7.3",
- "vulkano",
- "vulkano-shaders",
-]
-
-[[package]]
 name = "generic-array"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1372,6 +1361,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d79f1db9148be9d0e174bb3ac890f6030fcb1ed947267c5a91ee4c91b5a91e15"
 dependencies = [
  "byteorder",
+]
+
+[[package]]
+name = "orbits"
+version = "0.1.0"
+dependencies = [
+ "ggez",
+ "glsl-layout",
+ "rand 0.7.3",
+ "vulkano",
+ "vulkano-shaders",
 ]
 
 [[package]]

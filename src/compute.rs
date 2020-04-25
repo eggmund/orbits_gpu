@@ -5,7 +5,7 @@ use vulkano::device::Device;
 use vulkano::device::DeviceExtensions;
 use vulkano::device::Features;
 use vulkano::device::Queue;
-use vulkano::buffer::CpuAccessibleBuffer;
+use vulkano::buffer::{CpuAccessibleBuffer, CpuBufferPool};
 use vulkano::buffer::BufferUsage;
 use vulkano::pipeline::ComputePipeline;
 use vulkano::descriptor::pipeline_layout::PipelineLayout;
@@ -103,6 +103,16 @@ impl Body {
         }
     }
 
+    // 'Empty' struct with 0 values to be written by GPU
+    pub fn zero() -> Body {
+        Body {
+            pos: [0.0, 0.0].into(),
+            vel: [0.0, 0.0].into(),
+            radius: 0.0.into(),
+            mass: 0.0.into(),
+        }
+    }
+
     #[inline]
     pub fn mass_from_radius(r: f32, density: f32) -> f32 {
         use std::f32::consts::PI;
@@ -115,31 +125,31 @@ impl Body {
 // Body needs to have variables aligned properly for reading by GLSL
 // type GLSLBody = <Body as AsStd140>::Std140;
 
-pub struct Buffers {
-    pub time: Arc<CpuAccessibleBuffer<f32>>,
-    pub bodies: Arc<CpuAccessibleBuffer<[Body]>>,
+pub struct BodyBufferPools {
+    pub bodies_up_pool: CpuBufferPool<Vec<Body>>,
+    pub bodies_down_pool: CpuBufferPool<Vec<Body>>,
 }
 
 pub struct VulkanInstance {
     pub device: Arc<Device>,
     pub queue: Arc<Queue>,
     pub compute_pipeline: Arc<ComputePipeline<PipelineLayout<cs::Layout>>>,
-    pub descriptor_set: Arc<dyn DescriptorSet + Send + Sync>,
-    pub buffers: Buffers,
+    pub time_buffer: Arc<CpuAccessibleBuffer<f32>>,
+    pub body_buffer_pools: BodyBufferPools,
 }
 
 impl VulkanInstance {
-    pub fn new(bodies_data: Vec<Body>) -> VulkanInstance {
+    pub fn new() -> VulkanInstance {
         let (device, queue) = Self::setup_vulkan_device_and_queue();
-        let buffers = Self::setup_data_buffers(device.clone(), bodies_data);
-        let (compute_pipeline, descriptor_set) = Self::setup_compute_pipeline_and_descriptors(device.clone(), &buffers);
+        let (time_buffer, body_buffer_pools) = Self::setup_data_buffers(device.clone());
+        let (compute_pipeline, descriptor_set) = Self::setup_compute_pipeline(device.clone());
 
         VulkanInstance {
             device,
             queue,
             compute_pipeline,
-            descriptor_set,
-            buffers,
+            time_buffer,
+            body_buffer_pools,
         }
     }
 
@@ -164,32 +174,25 @@ impl VulkanInstance {
         (device, queues.next().unwrap())
     }
     
-    fn setup_data_buffers(device: Arc<Device>, data: Vec<Body>) -> Buffers {
-        let bodies = data.into_iter();
-            // .map(|b| b.std140());
-
+    fn setup_data_buffers(device: Arc<Device>) -> (Arc<CpuAccessibleBuffer<f32>>, BodyBufferPools) {
         // Buffer for dt. Starting value of 60fps
         let time_buf = CpuAccessibleBuffer::from_data(device.clone(), BufferUsage::uniform_buffer(), false, 1.0/60.0)
             .expect("failed to create time data buffer");
     
-        // Positions and velocities buffer
-        let bodies_buf = CpuAccessibleBuffer::from_iter(
-            device.clone(),
-            BufferUsage::all(),
-            true,
-            bodies
-        ).expect("failed to create positions buffer");
+        // Bodies upload/download pools
+        let bodies_up_pool = CpuBufferPool::upload(device.clone());
+        let bodies_down_pool = CpuBufferPool::download(device.clone());
     
-        Buffers {
-            time: time_buf,
-            bodies: bodies_buf,
-        }
+        (
+            time_buf,
+            BodyBufferPools {
+                bodies_up_pool,
+                bodies_down_pool,
+            },
+        )
     }
     
-    fn setup_compute_pipeline_and_descriptors(
-        device: Arc<Device>,
-        buffers: &Buffers,
-    ) -> (
+    fn setup_compute_pipeline(device: Arc<Device>) -> (
         Arc<ComputePipeline<PipelineLayout<cs::Layout>>>,
         Arc<dyn DescriptorSet + Send + Sync>,
     )
@@ -200,15 +203,11 @@ impl VulkanInstance {
         let compute_pipeline = Arc::new(ComputePipeline::new(device.clone(), &compute_shader.main_entry_point(), &())
             .expect("failed to create compute pipeline"));
     
-    
-        let layout = compute_pipeline.layout().descriptor_set_layout(0).unwrap();
-        let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
-            .add_buffer(buffers.time.clone()).unwrap()
-            .add_buffer(buffers.bodies.clone()).unwrap()
-            .build().unwrap()
-        );
-    
-        (compute_pipeline, descriptor_set)
+        compute_pipeline
+    }
+
+    fn setup_descriptor_sets() {
+
     }
 
     pub fn set_bodies_buffer(&mut self, new_bodies: Vec<Body>) {

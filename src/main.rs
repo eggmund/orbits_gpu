@@ -71,9 +71,9 @@ mod tools {
 
 struct MainState {
     vk_instance: VulkanInstance,
-    body_count: u32,
     rand_thread: ThreadRng,
     starting_update_num: usize,   // So that dt can stabilise
+    body_count: usize,
 }
 
 impl MainState {
@@ -82,13 +82,17 @@ impl MainState {
         let mut start_bodies = Vec::with_capacity(GALAXY_SIZE * 2 + 2);
 
         starting_setup!(&mut rand_thread, start_bodies);
-        let body_count = start_bodies.len() as u32;
+        let body_count = start_bodies.len();
+
+        let vk_instance = VulkanInstance::new();
+        // Upload start bodies
+        vk_instance.buffers.bodies_up_pool.next(start_bodies).unwrap();
 
         let s = MainState {
-            vk_instance: VulkanInstance::new(start_bodies),
-            body_count,
+            vk_instance,
             rand_thread,
             starting_update_num: 0,
+            body_count,
         };
         Ok(s)
     }
@@ -96,9 +100,8 @@ impl MainState {
     fn reset(&mut self) {
         let mut start_bodies = Vec::with_capacity(GALAXY_SIZE * 2 + 2);
         starting_setup!(&mut self.rand_thread, start_bodies);
-        self.body_count = start_bodies.len() as u32;
-
-        self.vk_instance.set_bodies_buffer(start_bodies);
+        self.body_count = start_bodies.len();
+        self.vk_instance.buffers.bodies_up_pool.next(start_bodies).unwrap();
     }
 
     fn spawn_galaxy(
@@ -203,9 +206,10 @@ impl event::EventHandler for MainState {
         graphics::clear(ctx, [0.1, 0.1, 0.15, 1.0].into());
         // Read positions from buffer
         {
-            let bodies_data = self.vk_instance.buffers.bodies.read().unwrap();
+            let mut bodies_download = vec![Body::zero(); self.body_count];
+            let bod_sub_buf_down = self.vk_instance.buffers.bodies_down_pool.next(bodies_download).unwrap();
 
-            for b in bodies_data.iter() {
+            for b in bodies_download.iter() {
                 let pos = {
                     let pos_ref: &[f32; 2] = b.pos.as_ref();
                     Point2::new(pos_ref[0], pos_ref[1])
